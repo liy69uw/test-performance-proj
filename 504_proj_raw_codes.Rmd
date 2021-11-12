@@ -1,0 +1,187 @@
+---
+title: "504_proj"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Read the cleanned data
+hs.ori <- read.csv("/Users/yiyangli/Desktop/UW/WI20/STAT 504/proj/highschooldata.csv")
+# My response of interest is AP scores. There are 4 variables in the original data directly linked to AP tests: AP_Test Takers, AP_Tests Taken, % AP_Score 1-2 and % AP_Score 3-5. 
+# I pick % AP_Score 3-5 to be my target response, "X..AP_Score.3.5". Also pick "numberAP = AP_Tests Taken / AP_Test Takers" to show how many AP tests a student takes on average.
+# My predictors, after the first round screening with backgroud knowledge and reserch interests, are picked to be: 
+# (Student statistics)
+# % Students With Disabilities
+# % Economically Disadvantaged
+# % Non-white = (1 - % White)
+# % Females
+# Average Class Size
+# (Expenditure statistics)
+# Average Salary
+# FTE Count 
+# Average Expenditures per Pupil
+
+# Extract columns of interest and omit rows with missing values
+hs.ori.interest <- hs.ori[,c(1,14,18,22,27,28,31,32,38,56,57,59)]
+hs.main <- hs.ori.interest[complete.cases(hs.ori.interest),]
+
+# Two new columns are computed: numberAP and  X..NonWhite
+hs.main$numberAP <- hs.main$AP_Tests.Taken / hs.main$AP_Test.Takers
+hs.main$X..NonWhite <- 1 - hs.main$X..White
+hs.main <- hs.main[,-c(1,4,10,11)]
+```
+Now my packed data for analysis is ready. 
+```{r}
+# pristine fit and residual check
+library(alr4)
+AP.full <- lm(X..AP_Score.3.5 ~ X..Students.With.Disabilities + X..Economically.Disadvantaged + X..Females + Average.Class.Size + Average.Salary + FTE.Count + Average.Expenditures.per.Pupil + X..NonWhite, data = hs.main)
+summary(AP.full)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(AP.full, which = c(1,3,4,5))
+```
+```{r}
+qqnorm(AP.full$residuals, plot.it = TRUE)
+```
+
+```{r}
+# multicollinearity check with corrplot()
+library(corrplot)
+M <- cor(hs.main)
+corrplot(M, method = "circle")
+```
+Excluding the response, it seems X..NonWhite, FTE.Count, X..Females might have the problem of multicollinearity.
+```{r}
+#  multicollinearity check with vif()
+library(car)
+vif(AP.full)
+```
+Based on VIF, X..NonWhite should be removed. It is not surprising considering that it is correlated with X..Economically.Disadvantaged.
+```{r}
+# see if any of the predictors needs to be transformed
+library(MASS)
+testfit.1 <- lm((X..AP_Score.3.5+1) ~ X..Students.With.Disabilities, data = hs.main)
+boxcox(testfit.1, plotit = T)
+```
+```{r}
+testfit.2 <- lm((X..AP_Score.3.5+1) ~ X..Economically.Disadvantaged, data = hs.main)
+boxcox(testfit.2, plotit = T)
+```
+```{r}
+testfit.3 <- lm((X..AP_Score.3.5+1) ~ X..Females, data = hs.main)
+boxcox(testfit.3, plotit = T)
+```
+```{r}
+testfit.4 <- lm((X..AP_Score.3.5+1) ~ Average.Class.Size, data = hs.main)
+boxcox(testfit.4, plotit = T)
+```
+
+```{r}
+testfit.5 <- lm((X..AP_Score.3.5+1) ~ Average.Salary, data = hs.main)
+boxcox(testfit.5, plotit = T)
+```
+```{r}
+testfit.6 <- lm((X..AP_Score.3.5+1) ~ FTE.Count, data = hs.main)
+boxcox(testfit.6, plotit = T)
+```
+```{r}
+testfit.7 <- lm((X..AP_Score.3.5+1) ~ Average.Expenditures.per.Pupil, data = hs.main)
+boxcox(testfit.7, plotit = T)
+```
+```{r}
+testfit.8 <- lm((X..AP_Score.3.5+1) ~ X..NonWhite, data = hs.main)
+boxcox(testfit.8, plotit = T)
+```
+No evidence of the need of boxcox transformation.
+```{r}
+# model selection by step()
+step(AP.full, direction = "both")
+```
+Starting from full, the selection is:
+```{r}
+fit.from.full <- lm(formula = X..AP_Score.3.5 ~ X..Economically.Disadvantaged + 
+    X..Females + Average.Salary + FTE.Count + X..NonWhite, data = hs.main)
+summary(fit.from.full)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(fit.from.full, which = c(1,3,4,5))
+```
+
+```{r}
+AP.empty <- lm(X..AP_Score.3.5 ~ 1, data = hs.main)
+scp <- list(lower = ~1, upper = ~X..Students.With.Disabilities + X..Economically.Disadvantaged + X..Females + Average.Class.Size + Average.Salary + FTE.Count + Average.Expenditures.per.Pupil + X..NonWhite)
+step(AP.empty, scope = scp, direction = "both")
+```
+Starting from empty, the selection is:
+```{r}
+fit.from.empty <- lm(formula = X..AP_Score.3.5 ~ X..Economically.Disadvantaged + 
+    X..Females + X..NonWhite + FTE.Count + Average.Salary, data = hs.main)
+summary(fit.from.empty)
+```
+Which is the same model as the start from the full model.
+```{r}
+# subset model selection by regsubsets()
+library(tidyverse)
+library(caret)
+library(leaps)
+models <- regsubsets(X..AP_Score.3.5 ~ X..Students.With.Disabilities + X..Economically.Disadvantaged + X..Females + Average.Class.Size + Average.Salary + FTE.Count + Average.Expenditures.per.Pupil + X..NonWhite, data = hs.main, nvmax = 9)
+summary(models)
+```
+```{r}
+res.sum <- summary(models)
+best.model.i <- which.min(res.sum$bic)
+best.model.i
+```
+The subset method indicates that the best model is 
+```{r}
+fit.subset <- lm(X..AP_Score.3.5 ~ X..Economically.Disadvantaged + X..Females + X..NonWhite, data = hs.main)
+summary(fit.subset)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(fit.subset, which = c(1,3,4,5))
+```
+```{r}
+# Coefficients are small so try Ridge/LASSO/ELN
+library(glmnet)
+## Lasso does not work with factor variables
+xx.hs <- model.matrix(X..AP_Score.3.5 ~ 0 + X..Students.With.Disabilities + X..Economically.Disadvantaged + X..Females + Average.Class.Size + Average.Salary + FTE.Count + Average.Expenditures.per.Pupil + X..NonWhite, data = hs.main)
+yy.hs <- hs.main$X..AP_Score.3.5
+ridge.hs <- cv.glmnet(xx.hs, scale(yy.hs,scale=F), alpha=0, intercept = F)
+ridge.hs$lambda.1se
+```
+```{r}
+fit.hs.ridge <- glmnet(xx.hs, scale(yy.hs,scale=F), alpha=0, lambda = ridge.hs$lambda.1se)
+coef(fit.hs.ridge)
+```
+```{r}
+lasso.hs <- cv.glmnet(xx.hs, scale(yy.hs,scale=F), alpha=1, intercept = F)
+lasso.hs$lambda.1se
+fit.hs.lasso <- glmnet(xx.hs, scale(yy.hs,scale=F), alpha=1, lambda = lasso.hs$lambda.1se)
+coef(fit.hs.lasso)
+```
+```{r}
+eln.hs <- cv.glmnet(xx.hs, scale(yy.hs,scale=F), alpha=0.5, intercept = F)
+eln.hs$lambda.1se
+fit.hs.eln <- glmnet(xx.hs, scale(yy.hs,scale=F), alpha=0.5, lambda = eln.hs$lambda.1se)
+coef(fit.hs.eln)
+```
+
+```{r}
+hs.ridge <- glmnet(xx.hs, scale(yy.hs,scale=F), alpha=0)
+hs.lasso <- glmnet(xx.hs, scale(yy.hs,scale=F), alpha=1)
+hs.eln <- glmnet(xx.hs, scale(yy.hs,scale=F), alpha=0.5)
+par(mfrow=c(2,2))
+plot(hs.ridge, xvar="lambda") 
+plot(hs.lasso, xvar="lambda") 
+plot(hs.eln, xvar="lambda") 
+```
+
+Discussions:  
+1) There are some schools contaniing 09-12 grades have N/A on AP-related responses, which means some students are automatically excluded from the discussion, leading to a decrease of sample size. There could be social-econ factors or local expenditure factors that contribute to the lack of participation, which could be a topic to dig deeper into.     
